@@ -1,0 +1,31 @@
+gha-creds-*.json
+/site
+.vscode
+.DS_Store
+
+# training
+outputs/
+/*.ipynb
+
+# Dataset
+datasets/*
+!datasets/README
+
+# No DVC caches
+asset_pipeline/.dvc
+asset_pipeline/tmp
+asset_pipeline/logs
+asset_pipeline/artifacts
+asset_pipeline/cad
+.git
+
+# Isaac Sim runtime caches accumulate here from local runs (multi-GB) and sit
+# inside the COPY'd OmniGibson/ tree — never ship them in images.
+OmniGibson/appdata
+
+# Local datasets / recordings / artifact tarballs
+data/
+CHANGES_SUMMARY.md
+**/__pycache__
+*.tar.zst
+*.zip

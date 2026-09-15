@@ -1,0 +1,14 @@
+# collected datasets — tracked separately, not in repo
+data/
+
+gha-creds-*.json
+/site
+.vscode
+.DS_Store
+
+# training
+outputs/
+/*.ipynb
+
+__pycache__/
+.codex

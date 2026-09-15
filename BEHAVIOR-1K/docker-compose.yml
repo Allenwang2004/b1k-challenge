@@ -1,0 +1,111 @@
+# Two-container BEHAVIOR-1K stack: simulation <-> policy over WebSocket.
+# Mirrors the official 2026 challenge architecture (policy = websocket server
+# on :8000 with /healthz; OmniGibson eval connects as a client).
+#
+#   docker compose up policy                     # policy server only
+#   docker compose run sim                       # shell in the sim container
+#   docker compose run sim python -m omnigibson.eval.eval \
+#       --task-name turning_on_radio --host policy --port 8000 \
+#       --instance-indices 0 --num-rollouts 1 --output-dir /data/outputs/eval
+#
+# Cross-host split (e.g. sim local, policy on Zettabyte): start `policy` on
+# the remote host, then run `sim` anywhere with --host <remote-ip>.
+#
+# HOST NOTES:
+#   * sim requires an RTX GPU on an Isaac-Sim-validated driver (580.65.06+;
+#     the 595.x branch segfaults — containers inherit the HOST driver).
+#     H100: camera-less workloads only (replay), no eval rendering.
+#   * policy runs on any CUDA host (H100, Blackwell, any recent driver).
+
+services:
+  # Mount-based dev variant of `policy`: real π0 checkpoint served from the
+  # host's openpi venv (mounted, not baked into the image) instead of the
+  # self-contained COPY-based build. See docker/PI0_SERVING.md. Paths below
+  # are under allen19 for testing; mirror the same absolute-path-identity
+  # requirement if these ever move to b1k-challenge (venv/checkpoint dirs
+  # bake in absolute host paths via editable installs and uv's python
+  # symlinks, so host path == container mount path is mandatory).
+  policy-dev:
+    image: b1k-policy-prod
+    # NON-ROOT (2026-08-24): never run as root (CLAUDE.md).
+    user: "${B1K_UID:-1011}:${B1K_GID:-1011}"
+    entrypoint: []
+    command: >
+      bash -c "cd /home/b1k-challenge/evaluation/b1k-baselines/baselines/openpi &&
+      .venv/bin/python scripts/serve_b1k_patched.py
+      --task_name=${TASK_NAME} policy:checkpoint
+      --policy.config=${POLICY_CONFIG:-pi0_b1k}
+      --policy.dir=${POLICY_DIR}"
+    gpus: all
+    ports:
+      - "18001:8000"
+    environment:
+      - HOME=/home/b1k-challenge
+      - CUDA_VISIBLE_DEVICES=${POLICY_GPU:-0}
+      # JAX preallocates 75% of the card by default (24.6 GB observed on a
+      # 32.6 GB GPU) which starves the sim renderer sharing it. Cap it.
+      - XLA_PYTHON_CLIENT_MEM_FRACTION=${POLICY_MEM_FRACTION:-0.12}
+      - TORCHDYNAMO_DISABLE=1
+      - B1K_TASK_DATA_JSON=/home/b1k-challenge/evaluation/BEHAVIOR-1K/docs/challenge/task_data.json
+    volumes:
+      # WRITABLE HOME (2026-08-24): nested mounts below still apply
+      - ${KIT_HOME:-/home/b1k-challenge/sim_eval_kit}/home:/home/b1k-challenge
+      - ${KIT_HOME:-/home/b1k-challenge/sim_eval_kit}/passwd:/etc/passwd:ro
+      - ${KIT_HOME:-/home/b1k-challenge/sim_eval_kit}/group:/etc/group:ro
+      - /home/b1k-challenge/evaluation/b1k-baselines:/home/b1k-challenge/evaluation/b1k-baselines
+      - /home/b1k-challenge/.local/share/uv:/home/b1k-challenge/.local/share/uv
+      - /home/b1k-challenge/evaluation/behavior_checkpoints:/home/b1k-challenge/evaluation/behavior_checkpoints
+      - /home/b1k-challenge/evaluation/BEHAVIOR-1K:/home/b1k-challenge/evaluation/BEHAVIOR-1K
+      - /home/b1k-challenge/evaluation/BEHAVIOR-1K/datasets:/data
+
+
+  policy:
+    image: b1k-policy-prod
+    # NON-ROOT (2026-08-24): never run as root (CLAUDE.md).
+    user: "${B1K_UID:-1011}:${B1K_GID:-1011}"
+    build:
+      context: .
+      dockerfile: docker/policy.Dockerfile
+      target: prod
+    gpus: all
+    ports:
+      - "9000:8000"
+    environment:
+      - HOME=/home/b1k-challenge
+      - CUDA_VISIBLE_DEVICES=${POLICY_GPU:-0}
+    volumes:
+      # WRITABLE HOME (2026-08-24): nested mounts below still apply
+      - ${KIT_HOME:-/home/b1k-challenge/sim_eval_kit}/home:/home/b1k-challenge
+      - ${KIT_HOME:-/home/b1k-challenge/sim_eval_kit}/passwd:/etc/passwd:ro
+      - ${KIT_HOME:-/home/b1k-challenge/sim_eval_kit}/group:/etc/group:ro
+
+  sim:
+    image: b1k-sim
+    # NON-ROOT (2026-08-24): never run as root (CLAUDE.md).
+    user: "${B1K_UID:-1011}:${B1K_GID:-1011}"
+    build:
+      context: .
+      dockerfile: docker/sim.Dockerfile
+    gpus: all
+    environment:
+      # WRITABLE HOME (2026-08-24): torch/triton + matplotlib write to $HOME; /home/b1k-challenge is root-owned inside the image
+      - HOME=/kit_home
+      - OMNIGIBSON_APPDATA_PATH=/kit_home/appdata
+      - OMNIGIBSON_HEADLESS=1
+      - ACCEPT_EULA=Y
+      - PRIVACY_CONSENT=Y
+      - CUDA_VISIBLE_DEVICES=${SIM_GPU:-1}
+    volumes:
+      - ${KIT_HOME:-/home/b1k-challenge/sim_eval_kit}:/kit_home
+      - ${KIT_HOME:-/home/b1k-challenge/sim_eval_kit}/passwd:/etc/passwd:ro
+      - ${KIT_HOME:-/home/b1k-challenge/sim_eval_kit}/group:/etc/group:ro
+      - ${KIT_HOME:-/home/b1k-challenge/sim_eval_kit}/isaacsim_apps:/opt/conda/envs/behavior/lib/python3.11/site-packages/isaacsim/apps
+      - ${DATASETS_DIR:-./datasets}:/data
+      - ${HOME}/docker/isaac-sim/cache:/cache
+      - ./data:/behavior-src/data # collected datasets land in the repo's data/
+    depends_on:
+      policy:
+        condition: service_healthy
+    # No default command: use `docker compose run sim <cmd>` (see header).
+    stdin_open: true
+    tty: true

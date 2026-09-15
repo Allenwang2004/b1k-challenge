@@ -1,0 +1,21 @@
+# ---- large data / weights (kept on disk, never in repo) ----
+/behavior_checkpoints/
+/train_set/
+/BEHAVIOR-1K/datasets/
+/BEHAVIOR-1K/data/
+
+# ---- local tooling ----
+/.local/
+.venv/
+.cache/
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.vscode/
+.DS_Store
+
+# ---- run artifacts ----
+outputs/
+wandb/
+*.log
+*.bak-*
