@@ -355,23 +355,26 @@ class Evaluator:
             return
         if self.robot_camera_names["head"] + "::rgb" not in self.obs:
             return
-        left_wrist_rgb = cv2.resize(
-            self.obs[self.robot_camera_names["left_wrist"] + "::rgb"].numpy(),
-            (224, 224),
-        )
-        right_wrist_rgb = cv2.resize(
-            self.obs[self.robot_camera_names["right_wrist"] + "::rgb"].numpy(),
-            (224, 224),
-        )
-        head_rgb = cv2.resize(
-            self.obs[self.robot_camera_names["head"] + "::rgb"].numpy(),
-            (448, 448),
-        )
+        head = self.obs[self.robot_camera_names["head"] + "::rgb"].numpy()
+        left = self.obs[self.robot_camera_names["left_wrist"] + "::rgb"].numpy()
+        right = self.obs[self.robot_camera_names["right_wrist"] + "::rgb"].numpy()
+        # Composite: [left wrist / right wrist] stacked on the left, head on the right. The height follows
+        # the rendered resolution so full-res wrappers give full-res video (DefaultWrapper's 224px cameras
+        # still produce the previous 448px layout); the wrists are never upscaled beyond half the height.
+        size = max(head.shape[0], 2 * left.shape[0])
+        size += size % 2  # libx264 yuv420p needs even dimensions
+        half = size // 2
+        left_wrist_rgb = cv2.resize(left, (half, half), interpolation=cv2.INTER_AREA)
+        right_wrist_rgb = cv2.resize(right, (half, half), interpolation=cv2.INTER_AREA)
+        head_rgb = cv2.resize(head, (size, size), interpolation=cv2.INTER_AREA if head.shape[0] >= size else cv2.INTER_CUBIC)
         frame = np.expand_dims(np.hstack([np.vstack([left_wrist_rgb, right_wrist_rgb]), head_rgb]), 0)
         if self._video_writer is None:
             # Writer is created lazily so its resolution matches the composite (H, W) frame above.
             self.video_writer = create_video_writer(
-                self._video_path, resolution=frame.shape[1:3], rate=self._video_rate
+                self._video_path,
+                resolution=frame.shape[1:3],
+                rate=self._video_rate,
+                stream_options={"crf": str(self.cfg.get("video_crf", 18)), "preset": "medium"},
             )
         write_video(frame, video_writer=self.video_writer, batch_size=1, mode="rgb")
 

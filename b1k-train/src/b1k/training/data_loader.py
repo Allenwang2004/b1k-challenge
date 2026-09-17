@@ -49,22 +49,19 @@ class DataLoaderImpl(DataLoader):
 def create_behavior_dataset(data_config: _config.DataConfig, action_horizon: int, seed: int | None = None) -> Dataset:
     """Create a BEHAVIOR-1K dataset for training.
     
-    Uses OmniGibson's BehaviorLeRobotDataset for efficient loading of BEHAVIOR-1K data.
+    Uses b1k.training.behavior_dataset.BehaviorLeRobotDataset (LeRobot v3.0, 2026 challenge demos).
+    Shuffling is done by TorchDataLoader, so ``seed`` is unused here and kept for API compatibility.
     
     Args:
         data_config: Data configuration
         action_horizon: Action horizon for delta timestamps
-        seed: Random seed for shuffling. If None, uses random seed based on current time.
+        seed: Unused.
     
     Returns:
         Dataset instance with BEHAVIOR-1K data
     """
-    from omnigibson.learning.datas.lerobot_dataset import BehaviorLeRobotDataset
-    
-    # Use random seed if not provided
-    if seed is None:
-        seed = int(time.time() * 1000) % (2**32)
-        logging.info(f"Using random seed for BehaviorLeRobotDataset: {seed}")
+    # LeRobot v3.0 loader for the 2026 challenge demos (the 2025 omnigibson.learning loader is gone in v3.9).
+    from b1k.training.behavior_dataset import BehaviorLeRobotDataset
     tasks = [
     "picking_up_trash", # difficulty: 2
     "putting_away_Halloween_decorations", # difficulty: 3
@@ -128,9 +125,6 @@ def create_behavior_dataset(data_config: _config.DataConfig, action_horizon: int
             key: [t / 30.0 for t in range(action_horizon)] for key in data_config.action_sequence_keys
         },
         episodes=data_config.episodes_index,
-        chunk_streaming_using_keyframe=False,
-        shuffle=True,
-        seed=seed,
     )
 
     if data_config.prompt_from_task:

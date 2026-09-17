@@ -1,0 +1,62 @@
+[package]
+description = "Main Omniverse Isaac Sim Application with XR OpenXR"
+execFile = "isaac-sim.app.xr.openxr"
+title = "Isaac Sim XR OpenXR"
+version = "5.1.0"
+keywords = ["experience", "app", "usd", "isaacsim", "xr"] # That makes it browsable in UI with "experience" filter
+
+
+[dependencies]
+"isaacsim.exp.base" = {}
+"omni.kit.xr.system.openxr" = {}
+"omni.kit.xr.profile.ar" = {}
+"isaacsim.xr.openxr" = {}
+
+[settings]
+app.xr.enabled = true
+app.fastShutdown = true
+app.name = "Isaac-Sim XR OpenXR"
+app.version = "5.1.0"
+app.vulkan = true                   # Explicitly enable Vulkan
+app.enableDeveloperWarnings = false # disable developer warnings to reduce log noise
+
+### async rendering settings
+omni.replicator.asyncRendering = true
+app.asyncRendering = true
+app.asyncRenderingLowLatency = true
+
+# work around for kitxr issue
+app.hydra.renderSettings.useUsdAttributes = false
+app.hydra.renderSettings.useFabricAttributes = false
+
+# For XR, set this back to default "#define OMNI_MAX_DEVICE_GROUP_DEVICE_COUNT 16"
+renderer.multiGpu.maxGpuCount = 16
+renderer.gpuEnumeration.glInterop.enabled = true # Allow Kit XR OpenXR to render headless
+
+xr.ui.enabled = false
+xrstage.profile.ar.anchorMode = "scene origin"
+xr.depth.aov = "GBufferDepth"
+defaults.xr.profile.ar.renderQuality = "off"
+rtx.rendermode = "RaytracedLighting"
+xr.openxr.components."omni.kit.xr.openxr.ext.hand_tracking".enabled = true
+xr.openxr.components."isaacsim.xr.openxr.hand_tracking".enabled = true
+
+[settings.app.exts.folders]
+'++' = [
+    "${app}",
+    "${app}/../exts",
+    "${app}/../extscache",
+    "${app}/../extsUser",
+    "${app}/../extsDeprecated",
+]
+
+[settings.app.window]
+hideUi = false
+title = "Isaac Sim XR OpenXR"
+
+[settings.exts."omni.kit.registry.nucleus"]
+registries = [
+	{ name = "kit/default", url = "https://ovextensionsprod.blob.core.windows.net/exts/kit/prod/107/shared" },
+	{ name = "kit/sdk", url = "https://ovextensionsprod.blob.core.windows.net/exts/kit/prod/sdk/${kit_version_short}/${kit_git_hash}" },
+	{ name = "kit/community", url = "https://dw290v42wisod.cloudfront.net/exts/kit/community" },
+]

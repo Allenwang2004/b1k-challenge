@@ -352,10 +352,13 @@ _CONFIGS = [
             freeze_vision_backbone=True,
         ),
         data=LeRobotB1KDataConfig(
-            repo_id="IliaLarchenko/behavior_224_rgb",
+            # 2026 challenge demos (LeRobot v3.0). Download per-task chunks into behavior_dataset_root,
+            # see src/b1k/training/behavior_dataset.py for the expected layout.
+            # Original (2025): repo_id="IliaLarchenko/behavior_224_rgb", root="~/data/behavior_224_rgb".
+            repo_id="behavior-1k/2026-challenge-demos",
             base_config=DataConfig(
                 prompt_from_task=False,  # No text prompts for PI_BEHAVIOR
-                behavior_dataset_root="~/data/behavior_224_rgb",
+                behavior_dataset_root="/home/b1k-challenge/evaluation/train_set/2026-challenge-demos",
                 use_per_timestamp_norm=True,  # Enable per-timestamp normalization
             ),
             use_delta_joint_actions=True,

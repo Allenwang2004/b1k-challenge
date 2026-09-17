@@ -26,10 +26,12 @@ dependencies = [
     "websockets>=14.1",
     "orbax-checkpoint>=0.10.3",
     "tqdm-loggable>=0.2",
-    "lerobot>=0.3.0",
+    "lerobot[dataset]>=0.5.0",
     "wandb>=0.18.0",
     "gpustat>=1.1.1",
     "huggingface-hub[cli]>=0.20.0",
+    "chex>=0.1.89",  # imported by openpi/models/utils/fsq_tokenizer.py but not declared by openpi
+    "pytest>=8.3.4",  # openpi/models_pytorch/gemma_pytorch.py imports pytest at module level
 ]
 
 [project.optional-dependencies]
@@ -39,8 +41,25 @@ dev = [
     "pre-commit>=4.0.1",
 ]
 
+[tool.uv]
+# Mirrors openpi/pyproject.toml overrides (not inherited from path deps).
+override-dependencies = [
+    "ml-dtypes==0.4.1",
+    "tensorstore==0.1.74",
+    # lerobot 0.5.x wants huggingface-hub>=1.0 but openpi@01177e0's transformers==4.53.2 needs <1.0.
+    # Force the <1.0 line, matching the combination already running in b1k-evaluation's openpi venv
+    # (huggingface-hub 0.36.2 + lerobot 0.5.2 + transformers 4.53.2).
+    "huggingface-hub>=0.34.2,<1.0",
+    # torchcodec must match torch: 0.4.x <-> torch 2.7 (the resolver otherwise picks 0.11 for torch 2.11).
+    "torchcodec==0.4.0",
+]
+
 [tool.uv.sources]
 openpi = { path = "openpi", editable = true }
+openpi-client = { path = "openpi/packages/openpi-client", editable = true }
+# LeRobot v3.0 dataset support for behavior-1k/2026-challenge-demos.
+# (openpi@01177e0 pins lerobot 0.3.4 / v2.1 format, which cannot read the 2026 data.)
+lerobot = { git = "https://github.com/wensi-ai/lerobot", branch = "release/b1k" }
 
 [build-system]
 requires = ["setuptools>=45", "wheel"]

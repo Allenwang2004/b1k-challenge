@@ -31,7 +31,7 @@ services:
     user: "${B1K_UID:-1011}:${B1K_GID:-1011}"
     entrypoint: []
     command: >
-      bash -c "cd /home/b1k-challenge/evaluation/b1k-baselines/baselines/openpi &&
+      bash -c "cd /home/b1k-challenge/evaluation/b1k-evaluation/baselines/openpi &&
       .venv/bin/python scripts/serve_b1k_patched.py
       --task_name=${TASK_NAME} policy:checkpoint
       --policy.config=${POLICY_CONFIG:-pi0_b1k}
@@ -49,10 +49,10 @@ services:
       - B1K_TASK_DATA_JSON=/home/b1k-challenge/evaluation/BEHAVIOR-1K/docs/challenge/task_data.json
     volumes:
       # WRITABLE HOME (2026-08-24): nested mounts below still apply
-      - ${KIT_HOME:-/home/b1k-challenge/sim_eval_kit}/home:/home/b1k-challenge
-      - ${KIT_HOME:-/home/b1k-challenge/sim_eval_kit}/passwd:/etc/passwd:ro
-      - ${KIT_HOME:-/home/b1k-challenge/sim_eval_kit}/group:/etc/group:ro
-      - /home/b1k-challenge/evaluation/b1k-baselines:/home/b1k-challenge/evaluation/b1k-baselines
+      - ${KIT_HOME:-/home/b1k-challenge/evaluation/sim_eval_kit}/home:/home/b1k-challenge
+      - ${KIT_HOME:-/home/b1k-challenge/evaluation/sim_eval_kit}/passwd:/etc/passwd:ro
+      - ${KIT_HOME:-/home/b1k-challenge/evaluation/sim_eval_kit}/group:/etc/group:ro
+      - /home/b1k-challenge/evaluation/b1k-evaluation:/home/b1k-challenge/evaluation/b1k-evaluation
       - /home/b1k-challenge/.local/share/uv:/home/b1k-challenge/.local/share/uv
       - /home/b1k-challenge/evaluation/behavior_checkpoints:/home/b1k-challenge/evaluation/behavior_checkpoints
       - /home/b1k-challenge/evaluation/BEHAVIOR-1K:/home/b1k-challenge/evaluation/BEHAVIOR-1K
@@ -75,9 +75,9 @@ services:
       - CUDA_VISIBLE_DEVICES=${POLICY_GPU:-0}
     volumes:
       # WRITABLE HOME (2026-08-24): nested mounts below still apply
-      - ${KIT_HOME:-/home/b1k-challenge/sim_eval_kit}/home:/home/b1k-challenge
-      - ${KIT_HOME:-/home/b1k-challenge/sim_eval_kit}/passwd:/etc/passwd:ro
-      - ${KIT_HOME:-/home/b1k-challenge/sim_eval_kit}/group:/etc/group:ro
+      - ${KIT_HOME:-/home/b1k-challenge/evaluation/sim_eval_kit}/home:/home/b1k-challenge
+      - ${KIT_HOME:-/home/b1k-challenge/evaluation/sim_eval_kit}/passwd:/etc/passwd:ro
+      - ${KIT_HOME:-/home/b1k-challenge/evaluation/sim_eval_kit}/group:/etc/group:ro
 
   sim:
     image: b1k-sim
@@ -96,10 +96,10 @@ services:
       - PRIVACY_CONSENT=Y
       - CUDA_VISIBLE_DEVICES=${SIM_GPU:-1}
     volumes:
-      - ${KIT_HOME:-/home/b1k-challenge/sim_eval_kit}:/kit_home
-      - ${KIT_HOME:-/home/b1k-challenge/sim_eval_kit}/passwd:/etc/passwd:ro
-      - ${KIT_HOME:-/home/b1k-challenge/sim_eval_kit}/group:/etc/group:ro
-      - ${KIT_HOME:-/home/b1k-challenge/sim_eval_kit}/isaacsim_apps:/opt/conda/envs/behavior/lib/python3.11/site-packages/isaacsim/apps
+      - ${KIT_HOME:-/home/b1k-challenge/evaluation/sim_eval_kit}:/kit_home
+      - ${KIT_HOME:-/home/b1k-challenge/evaluation/sim_eval_kit}/passwd:/etc/passwd:ro
+      - ${KIT_HOME:-/home/b1k-challenge/evaluation/sim_eval_kit}/group:/etc/group:ro
+      - ${KIT_HOME:-/home/b1k-challenge/evaluation/sim_eval_kit}/isaacsim_apps:/opt/conda/envs/behavior/lib/python3.11/site-packages/isaacsim/apps
       - ${DATASETS_DIR:-./datasets}:/data
       - ${HOME}/docker/isaac-sim/cache:/cache
       - ./data:/behavior-src/data # collected datasets land in the repo's data/

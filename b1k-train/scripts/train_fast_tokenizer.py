@@ -21,6 +21,7 @@ import openpi.transforms as transforms
 # Import B1K-specific modules
 from b1k.training import config as _config
 from b1k.policies.b1k_policy import extract_state_from_proprio
+from b1k.training.behavior_dataset import list_episode_frames, load_episode_frames
 
 
 def get_delta_transform_from_config(config_name: str):
@@ -58,7 +59,8 @@ def process_episode_file(args):
     episode_file, delta_mask, action_horizon, sample_fraction = args
     
     try:
-        df = pd.read_parquet(episode_file)
+        # episode_file is (parquet_path, episode_index) -- see list_episode_frames (2025 and v3 layouts)
+        df = load_episode_frames(*episode_file)
         
         states = []
         raw_actions = []
@@ -256,7 +258,7 @@ def main(
     
     # Find episode files
     data_root = Path(data_config.behavior_dataset_root)
-    all_episode_files = sorted(data_root.glob("data/task-*/episode_*.parquet"))
+    all_episode_files = list_episode_frames(data_root)
 
     episode_files = all_episode_files
     print(f"Using all {len(episode_files)} episodes")

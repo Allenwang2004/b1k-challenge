@@ -253,6 +253,8 @@ def run_task(task_id: int, task_name: str, args, env: dict, expected: int) -> tu
     if args.max_steps:
         cmd += ["--max-steps", str(args.max_steps)]
     cmd += ["--write-video"] if args.write_video else ["--no-write-video"]
+    if args.video_crf is not None:
+        cmd += ["--video-crf", str(args.video_crf)]
     cmd += ["--headless"] if args.headless else ["--no-headless"]
 
     if args.dry_run:
@@ -401,6 +403,7 @@ def main() -> int:
     p.add_argument("--env-wrapper", default="omnigibson.eval.wrappers.DefaultWrapper")
     p.add_argument("--max-steps", type=int, default=None)
     p.add_argument("--write-video", action="store_true")
+    p.add_argument("--video-crf", type=int, default=None, help="libx264 CRF for rollout videos (see omnigibson.eval.eval)")
     p.add_argument("--headless", action=argparse.BooleanOptionalAction, default=True)
     p.add_argument("--output-dir", required=True)
     p.add_argument("--data-path", default=None, help="overrides OMNIGIBSON_DATA_PATH for the task table")

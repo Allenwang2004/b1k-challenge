@@ -1,13 +1,13 @@
 {
   "checkpoints": {
     "checkpoint_4": {
-      "path": "/home/b1k-challenge/models_ilia/checkpoint_4",
+      "path": "/home/b1k-challenge/evaluation/behavior_checkpoints/ilia/checkpoint_4",
       "tasks": [
         40
       ]
     },
     "checkpoint_3": {
-      "path": "/home/b1k-challenge/models_ilia/checkpoint_3",
+      "path": "/home/b1k-challenge/evaluation/behavior_checkpoints/ilia/checkpoint_3",
       "tasks": [
         32,
         46,
@@ -25,7 +25,7 @@
       ]
     },
     "checkpoint_2": {
-      "path": "/home/b1k-challenge/models_ilia/checkpoint_2",
+      "path": "/home/b1k-challenge/evaluation/behavior_checkpoints/ilia/checkpoint_2",
       "tasks": [
         1,
         45,
@@ -46,7 +46,7 @@
       ]
     },
     "checkpoint_1": {
-      "path": "/home/b1k-challenge/models_ilia/checkpoint_1",
+      "path": "/home/b1k-challenge/evaluation/behavior_checkpoints/ilia/checkpoint_1",
       "tasks": [
         2,
         3,

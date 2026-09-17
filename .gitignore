@@ -19,3 +19,13 @@ outputs/
 wandb/
 *.log
 *.bak-*
+
+# ---- python build artifacts ----
+*.egg-info/
+
+# ---- rollout outputs (videos/json, written by the sim container) ----
+/eval_runs/
+
+# ---- sim_eval_kit runtime state (container HOME / app data) ----
+/sim_eval_kit/home/
+/sim_eval_kit/appdata/

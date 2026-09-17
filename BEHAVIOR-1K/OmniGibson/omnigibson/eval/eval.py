@@ -91,6 +91,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--video-fps", type=int, default=30, help="Frame rate for saved rollout videos.")
     parser.add_argument(
+        "--video-crf",
+        type=int,
+        default=18,
+        help="libx264 quality for saved rollout videos (lower = better/larger; 18 is visually lossless, 23 is x264's default).",
+    )
+    parser.add_argument(
         "--headless",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -134,6 +140,7 @@ def main() -> None:
             "partial_scene_load": True,
             "max_steps": args.max_steps,
             "write_video": args.write_video,
+            "video_crf": args.video_crf,
             "mode": args.mode,
             "seed": seed,
             "task": {"name": args.task_name},

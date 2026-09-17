@@ -1,0 +1,66 @@
+[package]
+description = "Start Any Isaac Sim App"
+title = "Isaac Sim App Selector"
+version = "5.1.0"
+
+# That makes it browsable in UI with "experience" filter
+keywords = ["app", "isaac-sim"]
+
+[dependencies]
+"isaacsim.app.selector" = {}
+"omni.kit.clipboard" = {}
+
+[settings]
+app.name = "Isaac-Sim_App_Selector"
+app.version = "5.1.0"
+app.window.title = "Isaac Sim App Selector [Deprecated]"
+
+app.extensions.enabledCore = []
+app.settings.persistent = true
+app.settings.standalone_mode = true
+
+ext.'isaacsim.app.selector'.apps = ["isaac-sim", "isaac-sim.streaming"]
+ext.'isaacsim.app.selector'.auto_start = false
+ext.'isaacsim.app.selector'.default_app = "isaac-sim"
+ext.'isaacsim.app.selector'.experimental_apps = []
+ext.'isaacsim.app.selector'.persistent_selector = false
+ext.'isaacsim.app.selector'.show_console = true
+
+# controled update rate
+app.runLoops.main.rateLimitEnabled = true
+app.runLoops.main.rateLimitFrequency = 60
+app.runLoops.main.rateLimitUseBusyLoop = false
+
+# setup size
+app.window.height = 488
+app.window.width = 500
+
+app.window.noResize = true
+# center position
+app.window.x = -1
+app.window.y = -1
+
+# icon
+app.window._iconSize = 256
+app.window.iconPath = "${isaacsim.app.selector}/icons/isaacsim.png"
+
+# window properties
+app.window.alwaysOnTop = false
+app.window.fullscreen = false
+app.window.noDecorations = false
+app.window.scaleToMonitor = true
+
+app.fastShutdown = true
+
+[settings."filter:platform"."windows-x86_64"]
+ext.'isaacsim.app.selector'.ros_bridge_extension = 0 # default is none
+[settings."filter:platform"."linux-x86_64"]
+ext.'isaacsim.app.selector'.ros_bridge_extension = 0 # default is none
+
+[settings.app.exts]
+folders = [
+    "${app}/../exts",
+    "${app}/../extscache",
+    "${app}/../extsUser",
+    "${app}/../extsDeprecated",
+]

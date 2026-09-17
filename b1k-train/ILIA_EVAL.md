@@ -12,6 +12,8 @@ the working one is given and the reason explained.
 - Weights: <https://huggingface.co/IliaLarchenko/behavior_submission>
 - Report: [arXiv 2512.06951](https://arxiv.org/abs/2512.06951)
 
+> **Paths moved 2026-09-17:** the checkpoint is now `~/evaluation/behavior_checkpoints/ilia/checkpoint_2` (was `~/models_ilia/checkpoint_2`) and run outputs are under `~/evaluation/eval_runs/` (was `~/eval_runs/`). `scripts/wait_for_gpu_and_rollout.sh` automates §4–§5 with the new paths; the commands below still show the old ones.
+
 ---
 
 ## 0. Where everything already lives (shared `b1k-challenge` account)

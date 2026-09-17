@@ -1,0 +1,34 @@
+[package]
+description = "A trimmed down app for use with python samples"
+title = "Isaac Sim Python"
+version = "5.1.0"
+
+keywords = ["experience", "app", "usd", "isaacsim"] # That makes it browsable in UI with "experience" filter
+
+
+[dependencies]
+"isaacsim.exp.base" = {}
+
+[settings.app]
+name = "Isaac-Sim Python"
+version = "5.1.0"
+settings.persistent = false        # settings reset on each run with this app
+window.title = "Isaac Sim Python"
+vulkan = true                      # Explicitly enable Vulkan
+enableDeveloperWarnings = false    # disable developer warnings to reduce log noise
+
+[settings.app.exts.folders]
+'++' = [
+    "${app}",
+    "${app}/../exts",
+    "${app}/../extscache",
+    "${app}/../extsUser",
+    "${app}/../extsDeprecated",
+]
+
+[settings.exts."omni.kit.registry.nucleus"]
+registries = [
+	{ name = "kit/default", url = "https://ovextensionsprod.blob.core.windows.net/exts/kit/prod/107/shared" },
+	{ name = "kit/sdk", url = "https://ovextensionsprod.blob.core.windows.net/exts/kit/prod/sdk/${kit_version_short}/${kit_git_hash}" },
+	{ name = "kit/community", url = "https://dw290v42wisod.cloudfront.net/exts/kit/community" },
+]

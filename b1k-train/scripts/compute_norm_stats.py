@@ -18,6 +18,7 @@ import openpi.transforms as transforms
 from b1k.shared import normalize
 from b1k.training import config as _config
 from b1k.policies.b1k_policy import extract_state_from_proprio
+from b1k.training.behavior_dataset import list_episode_frames, load_episode_frames
 
 
 def get_delta_transform_from_config(config_name: str):
@@ -67,8 +68,8 @@ def process_episode_file(args):
     episode_file, delta_mask, action_horizon, compute_per_timestamp, compute_correlation, sample_fraction = args
     
     try:
-        # Read parquet file directly
-        df = pd.read_parquet(episode_file)
+        # episode_file is (parquet_path, episode_index) -- see list_episode_frames (2025 and v3 layouts)
+        df = load_episode_frames(*episode_file)
         
         # Extract states and actions
         states = []
@@ -77,7 +78,7 @@ def process_episode_file(args):
         
         for _, row in df.iterrows():
             # Get raw proprioception and actions
-            raw_state = np.array(row["observation.state"])  # 256-dim
+            raw_state = np.array(row["observation.state"])  # 61-dim (2026 R1Pro layout)
             raw_action = np.array(row["action"])            # 23-dim
             
             # Apply state extraction (same as training/inference)
@@ -506,10 +507,10 @@ def main(
     
     # Find all episode parquet files
     data_root = Path(data_config.behavior_dataset_root)
-    print(f"Looking for episode files in: {data_root}/data/task-*/episode_*.parquet")
+    print(f"Looking for episodes in: {data_root}/data (task-*/episode_*.parquet or chunk-*/file-*.parquet)")
     
-    episode_files = list(data_root.glob("data/task-*/episode_*.parquet"))
-    print(f"Found {len(episode_files)} total episode files")
+    episode_files = list_episode_frames(data_root)
+    print(f"Found {len(episode_files)} total episodes")
     
     if max_episodes is not None:
         episode_files = episode_files[:max_episodes]

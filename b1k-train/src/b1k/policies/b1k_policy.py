@@ -12,7 +12,7 @@ import numpy as np
 
 from openpi import transforms
 from openpi.models import model as _model
-from omnigibson.learning.utils.eval_utils import PROPRIOCEPTION_INDICES
+from b1k.shared.proprio import PROPRIOCEPTION_INDICES  # 2026 R1Pro layout, vendored (no OmniGibson needed)
 
 
 def make_b1k_example() -> dict:
