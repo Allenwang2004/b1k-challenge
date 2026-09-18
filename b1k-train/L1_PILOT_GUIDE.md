@@ -1,8 +1,9 @@
 # L1 pilot rollouts — guide for Allen
 
-> **Status: not ready to run yet.** The recorder and the runner described below are being built and must
-> first pass a smoke rollout. Eduardo will tell you **"smoke passed"** — start only then. This guide will be
-> updated in place if anything below changes.
+> **Status: ready.** The smoke rollout passed on 2026-09-18: task 0,
+> instance 301 on GPU 1 -- 1,511 steps, success, q_score 1.0, against 1,794 steps and the same outcome in your
+> `rlc_ckpt2` run without the recorder. Recording cost 3.6 ms per 94 ms simulation step. You can start the
+> pilot whenever a GPU is free. This guide is updated in place if anything below changes.
 
 ## What this is
 
@@ -22,6 +23,7 @@ same time.
 | new file | what it does |
 |---|---|
 | `BEHAVIOR-1K/OmniGibson/omnigibson/eval/wrappers/l1_rollout_recorder.py` | the recorder (an env wrapper). Not exported from `wrappers/__init__.py`; it's loaded by its full path |
+| `BEHAVIOR-1K/OmniGibson/omnigibson/eval/wrappers/l1_record_io.py` | the file formats the recorder writes (no simulator imports) |
 | `b1k-train/serve_ilia_logged.py` | `serve_ilia.py` unchanged, plus a log of Ilia's stage prediction on every policy call |
 | `b1k-train/l1_pilot_rollouts.sh` | one command for the whole pilot: server, sim container, sweep |
 | `b1k-train/L1_PILOT_GUIDE.md` | this guide |
@@ -44,9 +46,11 @@ the recorder let us check that recording doesn't change the policy's outcomes.
 ## Before you start
 
 1. You have Eduardo's **"smoke passed"**.
-2. `nvidia-smi`: pick a GPU with **at least 24 GB free that nobody else is using** (sim ≈ 16 GB, server
-   ≈ 7.5 GB). If only a card someone else is using has room, ask Eduardo before going ahead.
-3. `df -h /`: **at least 20 GB free**. The runner refuses to start below that.
+2. `nvidia-smi`: pick a GPU with **at least 26 GB free that nobody else is using** (sim ≈ 16 GB, server
+   ≈ 7.5 GB). If only a card someone else is using has room, ask Eduardo before going ahead. The runner
+   checks this itself and refuses to start below it.
+3. `df -h /`: **at least 20 GB free**. The runner refuses to start below that. The recordings are small --
+   about 5 MB per 1,000 steps, so roughly 1.5 GB for the whole pilot -- but the videos are not.
 4. `cd ~/evaluation && git status`: nothing of yours in progress in the files listed above.
 
 ## Run it
@@ -57,16 +61,22 @@ bash l1_pilot_rollouts.sh --gpu <N> --dry-run   # prints every command it would 
 bash l1_pilot_rollouts.sh --gpu <N>             # starts the server and the sweep, detached
 ```
 
+One card carries both by default. To split them: `--server-gpu <A> --sim-gpu <B>`.
+
 What the runner does, in order:
 
-1. Starts `serve_ilia_logged.py` on port **8010** (checkpoint 2, JAX memory capped at 25% of the card), with
-   its pid in `eval_runs/l1_pilot/server.pid`.
+1. Starts `serve_ilia_logged.py` on port **8010** (checkpoint 2, JAX preallocation off and its memory capped
+   at 12% of the card, which is about 7.5 GB in practice), with its pid in `eval_runs/l1_pilot/server.pid`.
+   The server takes the norm stats and tokenizer that ship inside the checkpoint: `pi_behavior_b1k_fast` now
+   names your 2026 training dataset, while Ilia's checkpoints carry theirs under `IliaLarchenko/behavior_224_rgb`,
+   so it resolves the id from the checkpoint and logs which one it used. Nothing else about the config changes.
 2. Waits for `http://127.0.0.1:8010/healthz` to answer `200` (about a minute).
 3. Starts the sim container **non-root** — uid 1011 with the `sim_eval_kit` overlays, the same setup as the
    `sim` service in your `docker-compose.yml` — named `l1-pilot-sim`, with `--network host` and the recorder
    mounted.
 4. Inside it, runs `eval_rollout.py` on the 10 tasks above, with the recorder as `--env-wrapper`,
-   `--min-free-gb 20` and `--write-video`.
+   `--min-free-gb 20`, `--write-video` and a 12-hour-per-task timeout (`picking_up_toys` runs to its 28,336-step
+   limit on both instances, about 7.5 hours).
 5. Stops its own server when the sweep ends.
 
 ## Watch it
@@ -77,7 +87,12 @@ tail -f ~/evaluation/eval_runs/l1_pilot/logs/driver.log
 ```
 
 Healthy looks like: every 1–3 hours a task directory appears with `json/`, `videos/` and `l1_record/` in
-it, and `stage_logs/` keeps growing.
+it, and `stage_logs/` keeps growing. The task log also shows `L1 recorder: rollout <name> ...` when a rollout
+starts and `closed ...` when it ends.
+
+Running the sim non-root makes it write its caches into `sim_eval_kit/` (`.nv/`, `.nvidia-omniverse/`,
+`.triton/`, and two files under `isaacsim_apps/`). They show up as untracked in `git status`; they are caches,
+so please just leave them there.
 
 ## Stop it, resume it
 
