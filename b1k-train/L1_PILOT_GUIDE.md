@@ -1,9 +1,11 @@
 # L1 pilot rollouts — guide for Allen
 
-> **Status: ready.** The smoke rollout passed on 2026-09-18: task 0,
-> instance 301 on GPU 1 -- 1,511 steps, success, q_score 1.0, against 1,794 steps and the same outcome in your
-> `rlc_ckpt2` run without the recorder. Recording cost 3.6 ms per 94 ms simulation step. You can start the
-> pilot whenever a GPU is free. This guide is updated in place if anything below changes.
+> **Status: done — please don't rerun it.** The pilot ran on GPU 1 from 19:36 on 18 September to 06:25 on
+> 19 September (10 h 49 min): all 20 rollouts recorded and passed our checks. Outputs are in
+> `eval_runs/l1_pilot/`, with a checksum-verified copy on idlab1 at
+> `/mnt/train-data-1-hdd/b1k-challenge/l1_rollouts/`. Mean q 0.41 (2 successes, 13 partial, 5 zero), in line
+> with Ilia's own published 0.46 on the same tasks. Please leave `eval_runs/l1_pilot/` in place until Eduardo
+> says it can go. The next batch will come with an updated guide.
 
 ## What this is
 
