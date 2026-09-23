@@ -84,6 +84,11 @@ class DataConfig:
     # Only used for B1K data loader.
     behavior_dataset_root: str | None = None
 
+    # Per-frame BDDL stage labels (scripts/build_bddl_stage_labels.py). When set, the data loader adds
+    # an AttachBDDLStage transform that puts the symbolic task progress in data["bddl_stage"]. The
+    # heuristic time-split stage (ComputeSubtaskStateFromMeta -> "subtask_state") is untouched.
+    bddl_stage_labels_path: str | None = None
+
     # Action space for DROID dataset.
     action_space: droid_rlds_dataset.DroidActionSpace | None = None
     # Path to the data filter file for DROID dataset
@@ -282,6 +287,9 @@ class TrainConfig:
     save_interval: int = 1000
     # If set, any existing checkpoints matching step % keep_period == 0 will not be deleted.
     keep_period: int | None = 5000
+    # Delete the previous (non-kept) checkpoint *before* writing the next one, so at most one ~44 GB copy is
+    # on disk at a time (orbax alone keeps old+new until the new one is finalized). See scripts/train.py.
+    delete_previous_checkpoint_before_save: bool = False
 
     # If true, will overwrite the checkpoint directory if it already exists.
     overwrite: bool = False
@@ -378,6 +386,57 @@ _CONFIGS = [
         num_workers=80,
         save_interval=500,
         keep_period=2000,
+    ),
+    # Finetune the 2025 winner's checkpoint_2 (tasks incl. picking_up_trash) on the 2026 demos.
+    # Same model/recipe as above; only the init differs. Its assets dir must hold the checkpoint's own
+    # norm_stats.json + fast_tokenizer (copied from checkpoint_2/assets/IliaLarchenko/behavior_224_rgb),
+    # because the loaded action head / FAST head were trained against those, not against freshly
+    # computed 2026 stats.
+    TrainConfig(
+        name="pi_behavior_b1k_ft_ckpt2",
+        exp_name="openpi",
+        project_name="B1K",
+        model=pi_behavior_config.PiBehaviorConfig(
+            action_horizon=30,
+            action_dim=32,
+            use_correlated_noise=True,
+            correlation_beta=0.5,
+            use_fast_auxiliary=True,
+            fast_loss_weight=0.05,
+            fast_encoded_dims="0:6,7:23",
+            fast_vocab_size=1024,
+            max_fast_tokens=200,
+            use_kv_transform=True,
+            use_knowledge_insulation=False,
+            subtask_loss_weight=0.1,
+            freeze_vision_backbone=True,
+        ),
+        data=LeRobotB1KDataConfig(
+            repo_id="behavior-1k/2026-challenge-demos",
+            base_config=DataConfig(
+                prompt_from_task=False,
+                behavior_dataset_root="/home/b1k-challenge/evaluation/train_set/2026-challenge-demos",
+                use_per_timestamp_norm=True,
+            ),
+            use_delta_joint_actions=True,
+            use_fast_tokenization=True,
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1000,
+            peak_lr=1e-4,
+            decay_steps=20_000,
+            decay_lr=1e-5,
+        ),
+        num_flow_samples=15,
+        weight_loader=weight_loaders.PiBehaviorWeightLoader(
+            "/home/b1k-challenge/evaluation/behavior_checkpoints/ilia/checkpoint_2/params"
+        ),
+        num_train_steps=20_000,
+        assets_base_dir="./outputs/assets",
+        checkpoint_base_dir="./outputs/checkpoints",
+        num_workers=80,
+        save_interval=2000,
+        keep_period=10_000,
     ),
 ]
 

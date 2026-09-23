@@ -76,10 +76,11 @@ def init_wandb(config: _config.TrainConfig, *, resuming: bool, log_code: bool = 
     ckpt_dir = config.checkpoint_dir
     if not ckpt_dir.exists():
         raise FileNotFoundError(f"Checkpoint directory {ckpt_dir} does not exist.")
-    if resuming:
+    if resuming and (ckpt_dir / "wandb_id.txt").exists():
         run_id = (ckpt_dir / "wandb_id.txt").read_text().strip()
         wandb.init(id=run_id, resume="must", project=config.project_name)
     else:
+        # Fresh run, or resuming a checkpoint that was trained with wandb disabled (no wandb_id.txt yet).
         wandb.init(
             name=config.exp_name,
             config=dataclasses.asdict(config),
@@ -437,12 +438,23 @@ def main(config: _config.TrainConfig):
             main_metrics = {k: v for k, v in reduced_info.items() 
                           if "loss" in k or "accuracy" in k or k in ["grad_norm", "param_norm", "grad_norm_vlm", "grad_norm_action_expert"]}
             info_str = ", ".join(f"{k}={v:.4f}" for k, v in main_metrics.items())
-            pbar.write(f"Step {step}: {info_str}")
+            # logging.info (not only pbar.write): with wandb disabled this is the only record of the loss curve
+            logging.info(f"Step {step}: {info_str}")
             wandb.log(reduced_info, step=step)
             infos = []
         batch = next(data_iter)
 
         if (step % config.save_interval == 0 and step > start_step) or step == config.num_train_steps - 1:
+            if config.delete_previous_checkpoint_before_save:
+                # A full checkpoint is ~44 GB (params + optimizer + EMA) and orbax only deletes the old one
+                # after the new one is finalized (peak = 2x). On this shared, nearly full disk we delete the
+                # previous non-kept checkpoint *before* saving so only one copy ever exists. Risk: a crash
+                # during the save leaves no checkpoint to resume from.
+                checkpoint_manager.wait_until_finished()
+                for old_step in checkpoint_manager.all_steps():
+                    if old_step != step and (config.keep_period is None or old_step % config.keep_period != 0):
+                        logging.info(f"Deleting checkpoint {old_step} before saving {step} (disk headroom)")
+                        checkpoint_manager.delete(old_step)
             _checkpoints.save_state(checkpoint_manager, train_state, data_loader, step)
 
     logging.info("Waiting for checkpoint manager to finish")

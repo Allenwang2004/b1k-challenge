@@ -1,6 +1,7 @@
 """B1K policy wrapper with action compression, rolling inpainting, and stage voting."""
 
 import logging
+import os
 import numpy as np
 import torch
 import dataclasses
@@ -16,6 +17,11 @@ from b1k.shared.proprio import PROPRIOCEPTION_INDICES  # 2026 R1Pro layout, vend
 logger = logging.getLogger(__name__)
 
 RESIZE_SIZE = 224
+
+# Diagnostic: feed the model a deliberately wrong stage while the voting / correction logic keeps
+# tracking the real one. B1K_STAGE_OVERRIDE = "fixed:<n>" (model always sees stage n) or
+# "shift:<k>" (model sees tracked stage + k, clamped). Unset = normal behaviour.
+STAGE_OVERRIDE = os.environ.get("B1K_STAGE_OVERRIDE", "").strip() or None
 
 
 @dataclasses.dataclass
@@ -160,6 +166,20 @@ class B1KPolicyWrapper():
                     self.prediction_history.clear()
                     logger.info(f"⬅️  Stage went back: {old_stage} → {self.current_stage} (task {self.task_id}, step {self.step_count})")
     
+    def _stage_for_model(self) -> int:
+        """The stage the model is conditioned on (== tracked stage unless B1K_STAGE_OVERRIDE is set)."""
+        if STAGE_OVERRIDE is None or self.task_id is None:
+            return self.current_stage
+        mode, value = STAGE_OVERRIDE.split(":")
+        max_stage = TASK_NUM_STAGES[self.task_id] - 1
+        if mode == "fixed":
+            stage = int(value)
+        elif mode == "shift":
+            stage = self.current_stage + int(value)
+        else:
+            raise ValueError(f"B1K_STAGE_OVERRIDE={STAGE_OVERRIDE!r}: expected fixed:<n> or shift:<k>")
+        return max(0, min(stage, max_stage))
+
     def prepare_batch_for_pi_behavior(self, batch):
         """Prepare batch for PI_BEHAVIOR model by adding task_id and current_stage."""
         task_id = self.task_id if self.task_id is not None else -1
@@ -167,9 +187,12 @@ class B1KPolicyWrapper():
         if "prompt" in batch_copy:
             del batch_copy["prompt"]
         
-        batch_copy["tokenized_prompt"] = np.array([task_id, self.current_stage], dtype=np.int32)
+        stage = self._stage_for_model()
+        if STAGE_OVERRIDE is not None and self.prediction_count % 10 == 0:
+            logger.info(f"🧪 Stage override {STAGE_OVERRIDE}: model sees stage {stage}, tracked stage {self.current_stage}")
+        batch_copy["tokenized_prompt"] = np.array([task_id, stage], dtype=np.int32)
         batch_copy["tokenized_prompt_mask"] = np.array([True, True], dtype=bool)
-        batch_copy["subtask_state"] = np.array(self.current_stage, dtype=np.int32)
+        batch_copy["subtask_state"] = np.array(stage, dtype=np.int32)
         
         return batch_copy
     

@@ -27,5 +27,4 @@ wandb/
 /eval_runs/
 
 # ---- sim_eval_kit runtime state (container HOME / app data) ----
-/sim_eval_kit/home/
-/sim_eval_kit/appdata/
+/sim_eval_kit/

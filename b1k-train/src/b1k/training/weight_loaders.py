@@ -41,9 +41,20 @@ class PiBehaviorWeightLoader(WeightLoader):
         params_path = download.maybe_download(self.params_path)
         
         # Load directly with PyTreeCheckpointer (handles both old and new checkpoint formats)
-        with ocp.PyTreeCheckpointer() as ckptr:
-            restored = ckptr.restore(params_path)
-        
+        try:
+            with ocp.PyTreeCheckpointer() as ckptr:
+                restored = ckptr.restore(params_path)
+        except ValueError as e:
+            if "sharding" not in str(e):
+                raise
+            # Params saved by a (multi-GPU) training run carry sharding metadata that cannot be
+            # re-materialised here; restore them as host numpy arrays instead, like openpi's
+            # CheckpointWeightLoader / the policy server do (e.g. ILIA's checkpoint_2/params).
+            logging.info("Checkpoint has sharding metadata; restoring params as numpy arrays")
+            from openpi.models import model as _model
+
+            restored = {"params": _model.restore_params(params_path, restore_type=np.ndarray)}
+
         # Handle nested 'params' key (from some checkpoint formats)
         if isinstance(restored, dict) and "params" in restored:
             loaded_params = restored["params"]

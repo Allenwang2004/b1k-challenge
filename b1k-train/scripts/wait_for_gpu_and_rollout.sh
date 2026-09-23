@@ -21,6 +21,7 @@ TASKS="${TASKS:-1}"                                # picking_up_trash
 MODE="${MODE:-public_test}"
 INSTANCES="${INSTANCES:-0-9}"                      # -> instance ids 301..310
 RUN_NAME="${RUN_NAME:-rlc_ckpt2_task1_$(date +%Y%m%d)}"
+TEAM="${TEAM:-RLC-checkpoint2}"                    # --team written into submission.json
 EVAL_RUNS="${EVAL_RUNS:-$EVAL_ROOT/eval_runs}"
 CKPT="${CKPT:-$EVAL_ROOT/behavior_checkpoints/ilia/checkpoint_2}"   # ckpt 2 covers task 1
 PORT="${PORT:-8010}"
@@ -40,12 +41,15 @@ VIDEO_CRF="${VIDEO_CRF:-18}"
 # lets edits (wrapper, video compositing) take effect without rebuilding the image.
 EVAL_SRC_MOUNT="${EVAL_SRC_MOUNT:-$EVAL_ROOT/BEHAVIOR-1K/OmniGibson/omnigibson/eval:/behavior-src/OmniGibson/omnigibson/eval:ro}"
 RESTART_TRAINING_WATCHER="${RESTART_TRAINING_WATCHER:-1}"
+# serve_ilia_logged.py = serve_ilia.py + per-decision stage log (JSONL under <run>/stage_logs) + automatic
+# asset-id resolution (checkpoint_2 carries assets/IliaLarchenko/behavior_224_rgb, the config names the 2026 id).
+SERVE_SCRIPT="${SERVE_SCRIPT:-serve_ilia.py}"
 
 log() { echo "$(date '+%F %T') $*"; }
 gpu_free() { nvidia-smi -i "$1" --query-gpu=memory.used,memory.total --format=csv,noheader,nounits | awk -F', ' '{print $2-$1}'; }
 
 SERVER_PID=""
-CONTAINER="b1k-eval-rlc-task1"
+CONTAINER="${CONTAINER:-b1k-eval-${RUN_NAME}}"
 cleanup() {
     if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then kill "$SERVER_PID"; log "policy server stopped"; fi
     docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
@@ -78,9 +82,10 @@ while true; do
     # PREALLOCATE=true: claim the memory now so a job started during our boot cannot take it.
     SERVE_LOG="outputs/logs/ilia_serve.$(date +%Y%m%d-%H%M%S).log"
     ln -sfn "$(basename "$SERVE_LOG")" outputs/logs/ilia_serve.log
+    mkdir -p "$EVAL_RUNS/$RUN_NAME/stage_logs"
     CUDA_VISIBLE_DEVICES="$SERVER_GPU" XLA_PYTHON_CLIENT_PREALLOCATE=true XLA_PYTHON_CLIENT_MEM_FRACTION="$POLICY_MEM_FRACTION" \
-    TORCHDYNAMO_DISABLE=1 OMNIGIBSON_DATA_PATH="$DATA_PATH" \
-    "$POLICY_VENV/bin/python" -P "$ROOT/serve_ilia.py" --solution-repo "$ROOT" --port "$PORT" \
+    TORCHDYNAMO_DISABLE=1 OMNIGIBSON_DATA_PATH="$DATA_PATH" L1_STAGE_LOG_DIR="$EVAL_RUNS/$RUN_NAME/stage_logs" \
+    "$POLICY_VENV/bin/python" -P "$ROOT/$SERVE_SCRIPT" --solution-repo "$ROOT" --port "$PORT" \
         policy:checkpoint --policy.config pi_behavior_b1k_fast --policy.dir "$CKPT" > "$SERVE_LOG" 2>&1 &
     SERVER_PID=$!
     echo "$SERVER_PID" > outputs/ilia_serve.pid
@@ -122,7 +127,7 @@ while true; do
             --env-wrapper "$ENV_WRAPPER" \
             --write-video --video-crf "$VIDEO_CRF" --min-free-gb "$MIN_FREE_GB_DISK" \
             --submission-out "/scratch/$RUN_NAME/submission.json" \
-            --team "RLC-checkpoint2" > "outputs/logs/rollout_sim.$(date +%Y%m%d-%H%M%S).log" 2>&1
+            --team "$TEAM" > "outputs/logs/rollout_sim.$(date +%Y%m%d-%H%M%S).log" 2>&1
     rc=$?
     log "sim finished with exit ${rc}; rollout files: $(find "$OUT" -path '*/json/*.json' 2>/dev/null | wc -l)"
 

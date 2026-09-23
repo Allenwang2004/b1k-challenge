@@ -7,7 +7,10 @@ Reference: https://github.com/wensi-ai/openpi/tree/behavior
 """
 
 import dataclasses
+import json
 import logging
+from pathlib import Path
+
 import numpy as np
 
 # Import all standard transforms from OpenPI
@@ -183,6 +186,62 @@ class ComputeSubtaskStateFromMeta(DataTransformFn):
         subtask_state = max(0, min(subtask_state, num_stages - 1))
         
         data["subtask_state"] = np.array(subtask_state, dtype=np.int32)
+        return data
+
+
+class AttachBDDLStage(DataTransformFn):
+    """Adds the symbolic task progress of the BDDL sidecars as ``data["bddl_stage"]``.
+
+    Unlike :class:`ComputeSubtaskStateFromMeta`, which splits an episode into equal time slices,
+    this is the number of goal literals that actually hold at that frame -- for picking_up_trash,
+    how many cans are in the bin. Built offline by ``scripts/build_bddl_stage_labels.py``; see that
+    file for the definition and for how the sidecars' 30-step sampling is expanded to full rate.
+
+    The whole label set is read into memory once (a few MB for one task) so that data loader
+    workers forked afterwards share no file handles.
+
+    Assumes:
+    - ``data["episode_index"]`` and ``data["frame_index"]`` exist (the B1K dataset provides both)
+
+    Creates:
+    - ``data["bddl_stage"]``: stage index for this frame, ``np.int32`` scalar
+    """
+
+    def __init__(self, labels_path: str | Path):
+        self.labels_path = Path(labels_path).expanduser()
+        if not self.labels_path.exists():
+            raise FileNotFoundError(
+                f"BDDL stage labels not found at {self.labels_path}. "
+                "Build them with scripts/build_bddl_stage_labels.py."
+            )
+        with np.load(self.labels_path) as archive:
+            self.labels = {int(name.split("/", 1)[1]): archive[name] for name in archive.files}
+        meta_path = self.labels_path.with_suffix(".json")
+        self.num_stages = {}
+        if meta_path.exists():
+            self.num_stages = {int(k): int(v) for k, v in json.loads(meta_path.read_text())["num_stages"].items()}
+        logging.info(
+            f"AttachBDDLStage: {len(self.labels)} episodes from {self.labels_path}, "
+            f"stages per task: {self.num_stages}"
+        )
+
+    def __call__(self, data: DataDict) -> DataDict:
+        if "episode_index" not in data or "frame_index" not in data:
+            raise KeyError("AttachBDDLStage needs episode_index and frame_index in the sample")
+        episode_index = int(data["episode_index"])
+        frame_index = int(data["frame_index"])
+        stages = self.labels.get(episode_index)
+        if stages is None:
+            raise KeyError(
+                f"episode {episode_index} has no BDDL stage labels in {self.labels_path}; "
+                "rebuild them for every task in this training set."
+            )
+        if not 0 <= frame_index < len(stages):
+            raise IndexError(
+                f"frame {frame_index} is outside episode {episode_index} "
+                f"(labels cover {len(stages)} frames)"
+            )
+        data["bddl_stage"] = np.array(stages[frame_index], dtype=np.int32)
         return data
 
 

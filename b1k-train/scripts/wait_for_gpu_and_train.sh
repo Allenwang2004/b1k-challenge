@@ -9,7 +9,9 @@
 # Behaviour:
 #   * polls nvidia-smi every POLL_SEC; starts when GPU 0 and GPU 1 each have >= MIN_FREE_MIB free
 #   * caps JAX at (min free - HEADROOM_MIB) so other people's jobs are not squeezed
-#   * if training dies with RESOURCE_EXHAUSTED, halves the batch size (down to 2) and goes back to waiting
+#   * if training dies with RESOURCE_EXHAUSTED, waits for more free memory and resumes from the last checkpoint
+#     with the SAME batch size (OOM_HALVE=1 restores the old behaviour of halving the batch; that silently
+#     changed the recipe to batch 4 on 2026-09-21)
 #   * if a checkpoint for EXP_NAME already exists, resumes it instead of overwriting
 set -uo pipefail
 
@@ -30,6 +32,12 @@ LOG_INTERVAL="${LOG_INTERVAL:-100}"
 NUM_WORKERS="${NUM_WORKERS:-8}"
 CONFIG="${CONFIG:-pi_behavior_b1k_fast}"
 CKPT_DIR="outputs/checkpoints/${CONFIG}/${EXP_NAME}"
+# WANDB=1 logs to Weights & Biases (project "B1K" from the config; needs `wandb login` or WANDB_API_KEY),
+# otherwise wandb is disabled and metrics only go to the log file ("Step N: loss=...").
+WANDB_FLAG=$([ "${WANDB:-0}" = "1" ] && echo "--wandb_enabled" || echo "--no-wandb_enabled")
+# PREDELETE=1: delete the previous checkpoint before saving the next (one 44 GB copy on disk instead of two).
+PREDELETE_FLAG=$([ "${PREDELETE:-0}" = "1" ] && echo "--delete_previous_checkpoint_before_save" || echo "")
+OOM_HALVE="${OOM_HALVE:-0}"
 
 IFS=',' read -r -a GPU_LIST <<< "$GPUS"
 NUM_GPUS=${#GPU_LIST[@]}
@@ -86,7 +94,8 @@ while true; do
         --keep_period "$KEEP_PERIOD" \
         --log_interval "$LOG_INTERVAL" \
         --num_workers "$NUM_WORKERS" \
-        --no-wandb_enabled \
+        $WANDB_FLAG \
+        $PREDELETE_FLAG \
         $mode >> "$train_log" 2>&1
     rc=$?
 
@@ -96,7 +105,9 @@ while true; do
         exit 0
     fi
     if grep -q "RESOURCE_EXHAUSTED" "$train_log"; then
-        if (( BATCH_SIZE > 2 )); then
+        if [ "$OOM_HALVE" != "1" ]; then
+            log "training OOM (exit $rc); keeping batch_size=${BATCH_SIZE}, will resume from last checkpoint once more memory is free"
+        elif (( BATCH_SIZE > 2 )); then
             BATCH_SIZE=$(( BATCH_SIZE / 2 ))
             log "training OOM (exit $rc); retrying with batch_size=${BATCH_SIZE} once GPUs are free again"
         else
