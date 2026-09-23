@@ -441,6 +441,67 @@ _CONFIGS = [
         save_interval=2000,
         keep_period=10_000,
     ),
+    # The B arm of the stage-label experiment: identical to pi_behavior_b1k_ft_ckpt2 in every
+    # respect (same init, same data, same schedule, same everything) except where the stage signal
+    # comes from, so any difference in the result is attributable to the labels alone.
+    #
+    #   A (pi_behavior_b1k_ft_ckpt2): stage = the episode split into 6 equal time slices
+    #   B (this one):                 stage = how many goal literals actually hold (BDDL sidecars)
+    #
+    # In B the time-split slot is pinned to 0, the symbolic stage rides in its own prefix token
+    # (zero-initialised, so the model starts out exactly as A does), and the VLM's stage head is
+    # trained on the symbolic stage -- which is also what makes it predictable at inference.
+    TrainConfig(
+        name="pi_behavior_b1k_bddl_ckpt2",
+        exp_name="openpi",
+        project_name="B1K",
+        model=pi_behavior_config.PiBehaviorConfig(
+            action_horizon=30,
+            action_dim=32,
+            use_correlated_noise=True,
+            correlation_beta=0.5,
+            use_fast_auxiliary=True,
+            fast_loss_weight=0.05,
+            fast_encoded_dims="0:6,7:23",
+            fast_vocab_size=1024,
+            max_fast_tokens=200,
+            use_kv_transform=True,
+            use_knowledge_insulation=False,
+            subtask_loss_weight=0.1,
+            freeze_vision_backbone=True,
+            use_bddl_stage=True,
+        ),
+        data=LeRobotB1KDataConfig(
+            repo_id="behavior-1k/2026-challenge-demos",
+            base_config=DataConfig(
+                prompt_from_task=False,
+                behavior_dataset_root="/home/b1k-challenge/evaluation/train_set/2026-challenge-demos",
+                use_per_timestamp_norm=True,
+                bddl_stage_labels_path=(
+                    "/home/b1k-challenge/evaluation/b1k-train/outputs/assets/"
+                    "bddl_stage_labels/2026-challenge-demos.npz"
+                ),
+            ),
+            use_delta_joint_actions=True,
+            use_fast_tokenization=True,
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1000,
+            peak_lr=1e-4,
+            decay_steps=20_000,
+            decay_lr=1e-5,
+        ),
+        num_flow_samples=15,
+        weight_loader=weight_loaders.PiBehaviorWeightLoader(
+            "/home/b1k-challenge/evaluation/behavior_checkpoints/ilia/checkpoint_2/params"
+        ),
+        num_train_steps=20_000,
+        assets_base_dir="./outputs/assets",
+        checkpoint_base_dir="./outputs/checkpoints",
+        num_workers=80,
+        save_interval=2000,
+        keep_period=10_000,
+    ),
 ]
 
 if len({config.name for config in _CONFIGS}) != len(_CONFIGS):
