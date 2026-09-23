@@ -73,8 +73,10 @@ class PiBehaviorWeightLoader(WeightLoader):
         if has_task_embeddings:
             # Loading PI_BEHAVIOR checkpoint - load ALL weights from checkpoint
             logging.info("Loading PI_BEHAVIOR checkpoint (all weights will be loaded)")
-            # Use _merge_params with empty missing_regex to validate shapes
-            return _merge_params(loaded_params, params, missing_regex="^$")
+            # bddl_stage_embeddings is new in use_bddl_stage runs, so a checkpoint trained without it
+            # has no such entry; keep the model's (zero) init for it and load everything else.
+            missing_regex = "^$" if "bddl_stage_embeddings" in loaded_params else ".*bddl_stage_embeddings.*"
+            return _merge_params(loaded_params, params, missing_regex=missing_regex)
         else:
             # Loading Pi05 checkpoint - preserve new PI_BEHAVIOR-specific parameters
             logging.info("Loading Pi05 checkpoint (new PI_BEHAVIOR parameters will use random init)")
@@ -92,6 +94,7 @@ class PiBehaviorWeightLoader(WeightLoader):
                 ".*task_subtask_fusion.*|"
                 ".*fast_token_embedding.*|"
                 ".*fast_token_proj.*|"
+                ".*bddl_stage_embeddings.*|"
                 ".*kv_transform.*"
             )
             return _merge_params(loaded_params, params, missing_regex=missing_regex)

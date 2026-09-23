@@ -172,13 +172,12 @@ def transform_dataset(dataset: Dataset, data_config: _config.DataConfig, *, skip
                 logging.info("Added dataset-aware ComputeSubtaskStateFromMeta transform")
             else:
                 logging.warning("Skipping subtask state computation - dataset has no meta.episodes")
+            # Symbolic task progress from the BDDL sidecars, alongside the time-split subtask_state.
+            # Must come before TaskIndexToTaskId, which packs it into tokenized_prompt.
+            if data_config.bddl_stage_labels_path is not None:
+                model_transforms.append(b1k_transforms.AttachBDDLStage(data_config.bddl_stage_labels_path))
         else:
             model_transforms.append(transform)
-
-    # Symbolic task progress from the BDDL sidecars, alongside the time-split subtask_state.
-    if data_config.bddl_stage_labels_path is not None:
-        from b1k import transforms as b1k_transforms
-        model_transforms.append(b1k_transforms.AttachBDDLStage(data_config.bddl_stage_labels_path))
 
     transforms_list.extend(model_transforms)
 

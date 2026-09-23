@@ -114,7 +114,10 @@ class ModelTransformFactory(GroupFactory):
             inputs=[
                 _transforms.ResizeImages(224, 224),
                 b1k_transforms.ComputeSubtaskStateFromMeta(dataset=None),
-                b1k_transforms.TaskIndexToTaskId(),
+                b1k_transforms.TaskIndexToTaskId(
+                    include_bddl_stage=getattr(model_config, "use_bddl_stage", False),
+                    zero_subtask_state=getattr(model_config, "use_bddl_stage", False),
+                ),
                 _transforms.PadStatesAndActions(model_config.action_dim),
             ],
         )

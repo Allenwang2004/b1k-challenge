@@ -37,7 +37,7 @@ from openpi.transforms import (
     make_bool_mask,
 )
 
-from b1k.models.pi_behavior_config import TASK_NUM_STAGES
+from b1k.models.pi_behavior_config import BDDL_TASK_NUM_STAGES, TASK_NUM_STAGES
 from b1k.shared.normalize import NormStats
 
 
@@ -48,20 +48,32 @@ class TaskIndexToTaskId(DataTransformFn):
     PI_BEHAVIOR uses task embeddings instead of text prompts. This transform
     converts the dataset's task_index to task_id and prepares tokenized_prompt
     as [task_id, subtask_state] for the model.
-    
+
     Assumes:
     - data["task_index"] exists (from dataset)
     - data["subtask_state"] exists (computed by ComputeSubtaskStateFromMeta)
-    
+    - data["bddl_stage"] exists when include_bddl_stage is set (AttachBDDLStage)
+
     Creates:
     - data["tokenized_prompt"]: np.array([task_id, subtask_state], dtype=int32)
+      (plus bddl_stage as a third entry when include_bddl_stage is set)
     - data["tokenized_prompt_mask"]: np.array([True, True], dtype=bool)
     """
-    
+
     # Optional task remapping (dataset task_index → model task_id)
     # If None, assumes direct mapping (task_index == task_id)
     task_mapping: dict[int, int] | None = None
-    
+
+    # Append the BDDL symbolic progress as a third entry. Must match the model's use_bddl_stage.
+    include_bddl_stage: bool = False
+
+    # Write 0 into the subtask_state slot instead of the time-split stage, so the BDDL token is the
+    # model's only progress signal. The four fused task/stage tokens then degenerate into a constant
+    # "task N, at the beginning" bias, which the model learns to ignore. Keeping the zero in the data
+    # (rather than ignoring the slot inside the model) means tokenized_prompt always shows what the
+    # model actually saw, and eval only has to do the same thing.
+    zero_subtask_state: bool = False
+
     def __call__(self, data: DataDict) -> DataDict:
         # During inference, task_id might be provided directly instead of task_index
         if "task_id" in data:
@@ -87,12 +99,24 @@ class TaskIndexToTaskId(DataTransformFn):
 
         # Pack task_id and subtask_state (if available) into tokenized_prompt
         if "subtask_state" in data:
-            subtask_state = int(data["subtask_state"])
-            prompt_tokens = np.array([task_id, subtask_state], dtype=np.int32)  # [task_id, subtask_state]
-            prompt_mask = np.array([True, True], dtype=bool)
+            entries = [task_id, 0 if self.zero_subtask_state else int(data["subtask_state"])]
         else:
-            prompt_tokens = np.array([task_id], dtype=np.int32)  # Just [task_id]
-            prompt_mask = np.array([True], dtype=bool)
+            entries = [task_id]
+
+        if self.include_bddl_stage:
+            if "bddl_stage" not in data:
+                raise KeyError(
+                    "include_bddl_stage is set but the sample has no bddl_stage. Set "
+                    "DataConfig.bddl_stage_labels_path so AttachBDDLStage runs before this transform."
+                )
+            if len(entries) != 2:
+                raise ValueError(
+                    "bddl_stage must go in the third slot of tokenized_prompt, but subtask_state is missing"
+                )
+            entries.append(int(data["bddl_stage"]))
+
+        prompt_tokens = np.array(entries, dtype=np.int32)
+        prompt_mask = np.ones(len(entries), dtype=bool)
 
         return {
             **data, 
@@ -201,14 +225,19 @@ class AttachBDDLStage(DataTransformFn):
     workers forked afterwards share no file handles.
 
     Assumes:
-    - ``data["episode_index"]`` and ``data["frame_index"]`` exist (the B1K dataset provides both)
+    - ``data["episode_index"]`` exists, and either ``data["frame_index"]`` or ``data["timestamp"]``.
+      By the time model transforms run, ``B1kInputs`` has dropped ``frame_index`` but kept
+      ``timestamp`` (seconds), so the frame is normally recovered as ``round(timestamp * fps)`` --
+      rounded, not truncated: float32 turns frame 137 into 4.5666666 and 4.5666666 * 30 into
+      136.99999, which truncation would read as the previous frame.
 
     Creates:
     - ``data["bddl_stage"]``: stage index for this frame, ``np.int32`` scalar
     """
 
-    def __init__(self, labels_path: str | Path):
+    def __init__(self, labels_path: str | Path, fps: int = 30):
         self.labels_path = Path(labels_path).expanduser()
+        self.fps = fps
         if not self.labels_path.exists():
             raise FileNotFoundError(
                 f"BDDL stage labels not found at {self.labels_path}. "
@@ -220,16 +249,31 @@ class AttachBDDLStage(DataTransformFn):
         self.num_stages = {}
         if meta_path.exists():
             self.num_stages = {int(k): int(v) for k, v in json.loads(meta_path.read_text())["num_stages"].items()}
+        # The model sizes its embedding table from BDDL_TASK_NUM_STAGES, so a label file built from a
+        # different archive must not disagree with it -- a silent mismatch would index another task's rows.
+        for task_index, stages in self.num_stages.items():
+            declared = BDDL_TASK_NUM_STAGES[task_index]
+            if stages != declared:
+                raise ValueError(
+                    f"{self.labels_path} says task {task_index} has {stages} BDDL stages, but "
+                    f"BDDL_TASK_NUM_STAGES declares {declared}. Update the constant in "
+                    "pi_behavior_config.py (and remember it shifts every later task's offset)."
+                )
         logging.info(
             f"AttachBDDLStage: {len(self.labels)} episodes from {self.labels_path}, "
             f"stages per task: {self.num_stages}"
         )
 
     def __call__(self, data: DataDict) -> DataDict:
-        if "episode_index" not in data or "frame_index" not in data:
-            raise KeyError("AttachBDDLStage needs episode_index and frame_index in the sample")
+        if "episode_index" not in data:
+            raise KeyError("AttachBDDLStage needs episode_index in the sample")
         episode_index = int(data["episode_index"])
-        frame_index = int(data["frame_index"])
+        if "frame_index" in data:
+            frame_index = int(data["frame_index"])
+        elif "timestamp" in data:
+            frame_index = int(round(float(data["timestamp"]) * self.fps))
+        else:
+            raise KeyError("AttachBDDLStage needs either frame_index or timestamp in the sample")
         stages = self.labels.get(episode_index)
         if stages is None:
             raise KeyError(

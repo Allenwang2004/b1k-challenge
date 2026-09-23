@@ -23,10 +23,13 @@ from openpi.shared import array_typing as at
 from b1k.models import pi_behavior_config
 from b1k.models.observation import Observation, preprocess_observation
 from b1k.models.pi_behavior_config import (
-    TASK_NUM_STAGES, 
-    MAX_NUM_STAGES, 
-    TOTAL_TASK_STAGE_EMBEDDINGS, 
-    TASK_STAGE_OFFSETS
+    BDDL_TASK_NUM_STAGES,
+    TASK_NUM_STAGES,
+    MAX_NUM_STAGES,
+    TOTAL_TASK_STAGE_EMBEDDINGS,
+    TASK_STAGE_OFFSETS,
+    BDDL_TASK_STAGE_OFFSETS,
+    BDDL_TOTAL_STAGE_EMBEDDINGS,
 )
 
 logger = logging.getLogger("b1k")
@@ -159,6 +162,20 @@ class PiBehavior(_model.BaseModel):
             rngs=rngs,
         )
         
+        # BDDL symbolic progress: one embedding per (task, stage) pair, like task_stage_embeddings
+        # above but indexed with BDDL_TASK_STAGE_OFFSETS. It enters the prefix as its own token
+        # (see embed_prefix), at full paligemma width so no projection is needed. Zero-initialised:
+        # a fresh model behaves exactly as it would without the token until training moves it.
+        if config.use_bddl_stage:
+            self.bddl_stage_embeddings = nnx.Embed(
+                num_embeddings=BDDL_TOTAL_STAGE_EMBEDDINGS,
+                features=paligemma_config.width,
+                embedding_init=nnx.initializers.zeros_init(),
+                rngs=rngs,
+            )
+        else:
+            self.bddl_stage_embeddings = None
+
         # Gated fusion layers
         # Input: task_embedding + sincos + task_stage_emb = task_dim + 2*subtask_dim
         fusion_input_dim = config.task_embedding_dim + 2 * self.subtask_encoding_dim
@@ -516,6 +533,27 @@ class PiBehavior(_model.BaseModel):
         
         return fused_embeddings
 
+    def predict_stage(self, prefix_out, prefix_ar_mask, observation) -> at.Float[at.Array, "b {MAX_NUM_STAGES}"]:
+        """Stage logits from the VLM, masked to the stages the task actually has.
+
+        Read off the base task token, which sits just before the first token with ar_mask True (the
+        first of the four fused task/stage tokens). Everything from that boundary on is hidden from
+        it, so this head sees only the images and the task embedding -- never the stage it was
+        conditioned on, nor the robot state. It is a visual progress estimator.
+
+        With use_bddl_stage the stages being predicted are the BDDL ones (how many goal literals
+        hold), so the valid range comes from BDDL_TASK_NUM_STAGES rather than the time-split counts.
+        """
+        first_stage_token_idx = jnp.argmax(prefix_ar_mask)  # index of the first True
+        base_task_output = prefix_out[:, first_stage_token_idx - 1, :]
+        subtask_logits = self.stage_pred_from_vlm(base_task_output)  # [B, MAX_NUM_STAGES]
+
+        counts = BDDL_TASK_NUM_STAGES if self.config.use_bddl_stage else TASK_NUM_STAGES
+        task_ids = observation.tokenized_prompt[:, 0]  # [B]
+        task_num_stages = jnp.array(counts, dtype=jnp.int32)[task_ids]  # [B]
+        valid_mask = jnp.arange(MAX_NUM_STAGES)[None, :] < task_num_stages[:, None]  # [B, 15]
+        return jnp.where(valid_mask, subtask_logits, -jnp.inf)
+
     @at.typecheck
     def embed_prefix(
         self, 
@@ -607,7 +645,28 @@ class PiBehavior(_model.BaseModel):
             # State tokens have full bidirectional attention with all prefix tokens
             # (images, task, stages, and other state tokens)
             ar_mask += [False] * state_tokens.shape[1]
-        
+
+        # BDDL symbolic progress, one token, deliberately placed here -- after the state tokens and
+        # before FAST:
+        #   * ar_mask False and *after* the task block, so argmax(ar_mask) still points at the first
+        #     of the four fused stage tokens and the stage-prediction head keeps reading base_task
+        #     (compute_detailed_loss / sample_actions locate it that way);
+        #   * last in the prefix proper, so only the FAST tokens shift by one position -- and their
+        #     KV is dropped before the action expert sees the cache anyway.
+        if self.config.use_bddl_stage:
+            if obs.tokenized_prompt is None or obs.tokenized_prompt.shape[1] < 3:
+                raise ValueError(
+                    "use_bddl_stage is set but tokenized_prompt has no third column. The data "
+                    "pipeline must run AttachBDDLStage and TaskIndexToTaskId(include_bddl_stage=True)."
+                )
+            task_ids = obs.tokenized_prompt[:, 0]
+            bddl_stage = obs.tokenized_prompt[:, 2]
+            bddl_offsets = jnp.array(BDDL_TASK_STAGE_OFFSETS, dtype=jnp.int32)[task_ids]
+            bddl_tokens = self.bddl_stage_embeddings(bddl_offsets + bddl_stage)[:, None, :]  # [b, 1, d]
+            tokens.append(bddl_tokens)
+            input_mask.append(jnp.ones((bddl_tokens.shape[0], 1), dtype=jnp.bool_))
+            ar_mask += [False]
+
         # FAST tokens (from observation if provided)
         if self.config.use_fast_auxiliary and obs.fast_tokens is not None:
             fast_tokens = obs.fast_tokens  # [B, T]
@@ -717,18 +776,7 @@ class PiBehavior(_model.BaseModel):
         # Image tokens all have ar_mask=False, task starts with ar_mask=False (base) then True (stage tokens)
         # Structure: [images (all False)] [base_task (False)] [stages (True, False, False, False)]
         # Find first True (first stage token), base task is at that index - 1
-        first_stage_token_idx = jnp.argmax(prefix_ar_mask)  # Returns index of first True
-        base_task_token_idx = first_stage_token_idx - 1
-        base_task_output = prefix_out[:, base_task_token_idx, :]
-        subtask_logits = self.stage_pred_from_vlm(base_task_output)  # [B, MAX_NUM_STAGES]
-        
-        # Mask out invalid stages for each task (vectorized JAX operations)
-        task_ids = observation.tokenized_prompt[:, 0]  # [B]
-        task_num_stages_array = jnp.array(TASK_NUM_STAGES, dtype=jnp.int32)
-        task_num_stages = task_num_stages_array[task_ids]  # [B] - JAX array indexing
-        stage_range = jnp.arange(MAX_NUM_STAGES)  # [15]
-        valid_mask = stage_range[None, :] < task_num_stages[:, None]  # [B, 15]
-        subtask_logits = jnp.where(valid_mask, subtask_logits, -jnp.inf)  # Mask invalid stages
+        subtask_logits = self.predict_stage(prefix_out, prefix_ar_mask, observation)
         
         # 4. Extract FAST loss from prefix output (before removing from cache)
         fast_loss_value = 0.0
@@ -884,10 +932,14 @@ class PiBehavior(_model.BaseModel):
         # Total action loss: mean over horizon (H) and action dims (D) -> [B]
         losses["action_loss"] = jnp.mean(action_loss, axis=(-2, -1))
 
-        # 12. Add subtask loss during training
+        # 12. Add subtask loss during training.
+        # With use_bddl_stage the head is trained on the symbolic progress in column 2, not on the
+        # time-split stage in column 1 -- which the data pipeline pins to 0 in that mode, so keeping
+        # it as the target would make this loss degenerate (always predict 0) and waste the head.
         subtask_loss_value = 0.0
-        if train and observation.tokenized_prompt.shape[1] > 1:            
-            ground_truth_subtask = observation.tokenized_prompt[:, 1]
+        if train and observation.tokenized_prompt.shape[1] > 1:
+            stage_column = 2 if self.config.use_bddl_stage else 1
+            ground_truth_subtask = observation.tokenized_prompt[:, stage_column]
             subtask_loss = -jax.nn.log_softmax(subtask_logits)[
                 jnp.arange(ground_truth_subtask.shape[0]), ground_truth_subtask
             ]
@@ -1008,18 +1060,7 @@ class PiBehavior(_model.BaseModel):
         
         # Predict stage from VLM output of base task token
         # Find base task token position (same logic as in compute_detailed_loss)
-        first_stage_token_idx = jnp.argmax(prefix_ar_mask)  # Returns index of first True
-        base_task_token_idx = first_stage_token_idx - 1
-        base_task_output = prefix_out[:, base_task_token_idx, :]
-        subtask_logits = self.stage_pred_from_vlm(base_task_output)  # [B, MAX_NUM_STAGES]
-        
-        # Mask out invalid stages for each task (vectorized JAX operations)
-        task_ids = observation.tokenized_prompt[:, 0]  # [B]
-        task_num_stages_array = jnp.array(TASK_NUM_STAGES, dtype=jnp.int32)
-        task_num_stages = task_num_stages_array[task_ids]  # [B] - JAX array indexing
-        stage_range = jnp.arange(MAX_NUM_STAGES)  # [15]
-        valid_mask = stage_range[None, :] < task_num_stages[:, None]  # [B, 15]
-        subtask_logits = jnp.where(valid_mask, subtask_logits, -jnp.inf)
+        subtask_logits = self.predict_stage(prefix_out, prefix_ar_mask, observation)
         
         # Transform KV cache for cross-layer attention
         if self.kv_transform is not None:

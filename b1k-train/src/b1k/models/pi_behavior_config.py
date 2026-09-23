@@ -41,6 +41,28 @@ TOTAL_TASK_STAGE_EMBEDDINGS = sum(TASK_NUM_STAGES)  # 596 total embeddings
 TASK_STAGE_OFFSETS = tuple([0] + [sum(TASK_NUM_STAGES[:i+1]) for i in range(len(TASK_NUM_STAGES) - 1)])
 
 
+# Per-task stage counts for the BDDL symbolic progress (use_bddl_stage). Unlike TASK_NUM_STAGES
+# above, which divides an episode into equal time slices, a stage here is "how many goal literals
+# of the best solution option hold", so the count is (literals of the largest option) + 1 -- the +1
+# being stage 0, nothing done. Measured over all 200 demos of each task in the BDDL sidecar archive
+# by scripts/build_bddl_stage_labels.py; AttachBDDLStage checks the labels it loads against these.
+BDDL_TASK_NUM_STAGES = (
+    2, 4, 8, 8, 10, 7, 10, 7, 5, 10,  # Tasks 0-9
+    7, 15, 7, 4, 5, 4, 3, 4, 4, 8,  # Tasks 10-19
+    14, 8, 11, 7, 9, 6, 14, 9, 11, 12,  # Tasks 20-29
+    9, 3, 3, 7, 2, 2, 2, 2, 3, 3,  # Tasks 30-39
+    3, 5, 5, 10, 9, 2, 8, 8, 11, 3,  # Tasks 40-49
+)
+
+BDDL_TOTAL_STAGE_EMBEDDINGS = sum(BDDL_TASK_NUM_STAGES)  # 333 total embeddings
+
+BDDL_TASK_STAGE_OFFSETS = tuple(
+    [0] + [sum(BDDL_TASK_NUM_STAGES[:i + 1]) for i in range(len(BDDL_TASK_NUM_STAGES) - 1)]
+)
+
+assert len(BDDL_TASK_NUM_STAGES) == len(TASK_NUM_STAGES), "BDDL stage counts must cover the same tasks"
+
+
 @dataclasses.dataclass(frozen=True)
 class PiBehaviorConfig(_model.BaseModelConfig):
     dtype: str = "bfloat16"
@@ -110,6 +132,16 @@ class PiBehaviorConfig(_model.BaseModelConfig):
     # Vision backbone finetuning control
     freeze_vision_backbone: bool = True
 
+    # Carry the BDDL symbolic task progress (transforms.AttachBDDLStage) as a third column of
+    # tokenized_prompt: [task_id, subtask_state, bddl_stage]. False keeps the original two columns,
+    # so existing checkpoints and configs are unaffected.
+    use_bddl_stage: bool = False
+
+    @property
+    def prompt_len(self) -> int:
+        """Columns of tokenized_prompt: [task_id, subtask_state] (+ bddl_stage)."""
+        return 3 if self.use_bddl_stage else 2
+
     def __post_init__(self):
         if self.task_embedding_dim is None:
             paligemma_config = _gemma.get_config(self.paligemma_variant)
@@ -158,8 +190,8 @@ class PiBehaviorConfig(_model.BaseModelConfig):
                     "right_wrist_0_rgb": image_mask_spec,
                 },
                 "state": jax.ShapeDtypeStruct([batch_size, self.action_dim], jnp.float32),
-                "tokenized_prompt": jax.ShapeDtypeStruct([batch_size, 2], jnp.int32),
-                "tokenized_prompt_mask": jax.ShapeDtypeStruct([batch_size, 2], bool),
+                "tokenized_prompt": jax.ShapeDtypeStruct([batch_size, self.prompt_len], jnp.int32),
+                "tokenized_prompt_mask": jax.ShapeDtypeStruct([batch_size, self.prompt_len], bool),
             }
             
             if self.use_fast_auxiliary:
